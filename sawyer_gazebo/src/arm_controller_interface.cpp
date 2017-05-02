@@ -30,7 +30,24 @@ void ArmControllerInterface::init(ros::NodeHandle& nh, std::string side,
                        &ArmControllerInterface::jointCommandTimeoutCallback, this);
   joint_command_sub_ = nh.subscribe("limb/"+side_+"/joint_command", 1,
                        &ArmControllerInterface::jointCommandCallback, this);
+  /*joint_command_sub_ = nh.subscribe("joint_states", 1,
+                       &ArmControllerInterface::jointStatesCallback, this);*/
+  std::vector<double> initial_joint_poses;
+  if (nh.getParam("/robot_config/"+side_+"_config/joint_names", joint_names_)) {
+    if (nh.getParam("/robot_config/"+side_+"_config/initial_pose", initial_joint_poses)) {
+      intera_core_msgs::JointCommand cmd;
+      cmd.mode = intera_core_msgs::JointCommand::POSITION_MODE;
+      cmd.names = joint_names_;
+      cmd.position = initial_joint_poses;
+      joint_command_pub_ = nh.advertise("limb/"+side_+"/joint_command", 1);
+      joint_command_pub_.publish(cmd);
+      //ArmControllerInterface::jointCommandCallback(cmd);
+    }
+  }
 }
+
+/*void ArmControllerInterface::jointStatesCallback(const sensor_msgs::JointStatesConstPtr& msg) {
+}*/
 
 void ArmControllerInterface::speedRatioCallback(const std_msgs::Float64 msg) {
   ROS_INFO_STREAM_NAMED("ros_control_plugin", "Data: " << msg.data);

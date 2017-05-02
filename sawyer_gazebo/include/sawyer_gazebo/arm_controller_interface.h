@@ -37,6 +37,7 @@ namespace sawyer_gazebo {
     std::mutex mtx_;
     int current_mode_;
     std::string side_;
+    std::vector<std::string> joint_names_;
     ros::Subscriber speed_ratio_sub_;
     ros::Subscriber joint_command_timeout_sub_;
     ros::Subscriber joint_command_sub_;

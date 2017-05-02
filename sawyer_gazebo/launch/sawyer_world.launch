@@ -2,7 +2,7 @@
 <launch>
 
   <!-- these are the arguments you can pass this launch file, for example paused:=true -->
-  <arg name="paused" default="false"/>
+  <arg name="paused" default="true"/>
   <arg name="use_sim_time" default="true"/>
   <arg name="gui" default="true"/>
   <arg name="headless" default="false"/>
@@ -36,16 +36,19 @@
   <!-- Publish a static transform between the world and the base of the robot -->
   <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_world" args="0 0 0 0 0 0 1 world base" />
 
+
+
   <!-- Run a python script to the send a service call to gazebo_ros to spawn a URDF robot -->
    <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" respawn="false" output="screen"
 	args="-param robot_description -urdf -z 0.93 -model sawyer
-              -J sawyer::right_j0 -0.272659
-              -J sawyer::right_j1 1.04701
-              -J sawyer::right_j2 -0.00123203
-              -J sawyer::right_j3 0.49262
-              -J sawyer::right_j4 -0.0806423
-              -J sawyer::right_j5 -0.0620532
-              -J sawyer::right_j6 0.0265941" />
+              -J sawyer::head_pan -0.02044
+              -J sawyer::right_j0  0.00000
+              -J sawyer::right_j1 -1.17836
+              -J sawyer::right_j2  0.00022
+              -J sawyer::right_j3  2.18048
+              -J sawyer::right_j4 -0.00361
+              -J sawyer::right_j5  0.56461
+              -J sawyer::right_j6  3.30961" />
 
   <!-- ros_control sawyer launch file -->
   <include file="$(find sawyer_sim_controllers)/launch/sawyer_sim_controllers.launch">
