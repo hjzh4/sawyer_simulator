@@ -20,9 +20,11 @@
 
 #include <ros/ros.h>
 #include <controller_manager/controller_manager.h>
+#include <realtime_tools/realtime_box.h>
 
 #include <std_msgs/Float64.h>
 #include <intera_core_msgs/JointCommand.h>
+#include <intera_core_msgs/SEAJointState.h>
 
 
 namespace sawyer_gazebo {
@@ -36,18 +38,28 @@ namespace sawyer_gazebo {
     // mutex for re-entrant calls to modeCommandCallback
     std::mutex mtx_;
     int current_mode_;
+    bool usr_command_;
+    intera_core_msgs::JointCommand last_jnt_cmd_;
     std::string side_;
-    ros::Subscriber speed_ratio_sub_;
+    ros::Timer update_timer_;
+    ros::Time last_command_time_;
     ros::Subscriber joint_command_timeout_sub_;
     ros::Subscriber joint_command_sub_;
+    ros::Subscriber joint_state_sub_;
+    ros::Publisher jnt_cmd_pub_;
     boost::shared_ptr<controller_manager::ControllerManager> controller_manager_;
+    realtime_tools::RealtimeBox< std::shared_ptr<const intera_core_msgs::SEAJointState> > joint_state_buffer_;
+    realtime_tools::RealtimeBox< std::shared_ptr<const ros::Duration> > command_timeout_buffer_;
 
   protected:
-    void speedRatioCallback(const std_msgs::Float64 msg);
+    /* Callback to capture and store the current joint states of the robot
+     */
+    void jointStateCallback(const intera_core_msgs::SEAJointStateConstPtr& msg);
     void jointCommandTimeoutCallback(const std_msgs::Float64 msg);
     void jointCommandCallback(const intera_core_msgs::JointCommandConstPtr& msg);
     std::string getControllerString(std::string mode_str);
-
+    void publishCmdCurrentPose(bool usr_cmd);
+    void update(const ros::TimerEvent& e);
 
   };
 }

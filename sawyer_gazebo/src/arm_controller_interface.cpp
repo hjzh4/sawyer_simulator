@@ -24,20 +24,45 @@ void ArmControllerInterface::init(ros::NodeHandle& nh, std::string side,
   current_mode_ = -1;
   side_ = side;
   controller_manager_ = controller_manager;
-  speed_ratio_sub_ = nh.subscribe("limb/"+side_+"/set_speed_ratio", 1,
-                       &ArmControllerInterface::speedRatioCallback, this);
   joint_command_timeout_sub_ = nh.subscribe("limb/"+side_+"/joint_command_timeout", 1,
                        &ArmControllerInterface::jointCommandTimeoutCallback, this);
   joint_command_sub_ = nh.subscribe("limb/"+side_+"/joint_command", 1,
                        &ArmControllerInterface::jointCommandCallback, this);
+  joint_state_sub_ = nh.subscribe("limb/"+side_+"/gravity_compensation_torques", 1,
+                       &ArmControllerInterface::jointStateCallback, this);
+  jnt_cmd_pub_ = nh.advertise<intera_core_msgs::JointCommand>("limb/"+side_+"/joint_command", 1);
+  // Update at 100Hz
+  auto command_timeout = std::make_shared<ros::Duration>(0.2);
+  usr_command_ = true;
+  command_timeout_buffer_.set(command_timeout);
+  last_command_time_ = ros::Time::now();
+  update_timer_ = nh.createTimer(100, &ArmControllerInterface::update, this);
 }
 
-void ArmControllerInterface::speedRatioCallback(const std_msgs::Float64 msg) {
-  ROS_INFO_STREAM_NAMED("ros_control_plugin", "Data: " << msg.data);
+void ArmControllerInterface::jointStateCallback(const intera_core_msgs::SEAJointStateConstPtr& msg)
+{
+  auto joint_state = std::make_shared<intera_core_msgs::SEAJointState>(*msg);
+  joint_state_buffer_.set(joint_state);  // FIXME - what happens when different joint states messages are received?
+}
+
+void ArmControllerInterface::update(const ros::TimerEvent& e)
+{
+  std::shared_ptr<const ros::Duration> command_timeout;
+  command_timeout_buffer_.get(command_timeout);
+  if (usr_command_ &&
+      command_timeout.get() &&
+      (ros::Time::now() - last_command_time_ > *command_timeout.get()))
+  {
+    ROS_INFO_STREAM_NAMED("sawyer_control_plugin", "Joint command timeout reached: " << *command_timeout.get());
+    publishCmdCurrentPose(usr_command_);
+    usr_command_ = false;
+  }
 }
 
 void ArmControllerInterface::jointCommandTimeoutCallback(const std_msgs::Float64 msg) {
-  ROS_INFO_STREAM_NAMED("sawyer_control_plugin", "Joint command timeout: " << msg.data);
+  ROS_DEBUG_STREAM_NAMED("sawyer_control_plugin", "Joint command timeout: " << msg.data);
+  auto command_timeout = std::make_shared<ros::Duration>(msg.data);
+  command_timeout_buffer_.set(command_timeout);
 }
 
 std::string ArmControllerInterface::getControllerString(std::string mode_str){
@@ -46,10 +71,32 @@ std::string ArmControllerInterface::getControllerString(std::string mode_str){
     return ss.str();
 }
 
-void ArmControllerInterface::jointCommandCallback(const intera_core_msgs::JointCommandConstPtr& msg) {
-  // lock out other thread(s) which are getting called back via ros.
-  std::lock_guard<std::mutex> guard(mtx_);
+void ArmControllerInterface::publishCmdCurrentPose(bool usr_cmd)
+{
+  std::shared_ptr<const intera_core_msgs::SEAJointState> joint_state;
+  joint_state_buffer_.get(joint_state);
+  if (joint_state.get())
+  {
+    if(usr_cmd){
+      intera_core_msgs::JointCommand jnt_cmd;
+      jnt_cmd.mode = intera_core_msgs::JointCommand::POSITION_MODE;
+      auto j_state = *joint_state.get();
+      jnt_cmd.names = j_state.name;
+      jnt_cmd.position = j_state.actual_position;
+      jnt_cmd.header.stamp = ros::Time::now();
+      jnt_cmd.header.seq = std::numeric_limits<unsigned int>::max();
+      last_jnt_cmd_ = jnt_cmd;
+    }
+    jnt_cmd_pub_.publish(last_jnt_cmd_);
+  }
+}
 
+void ArmControllerInterface::jointCommandCallback(const intera_core_msgs::JointCommandConstPtr& msg) {
+  if(msg->header.seq < std::numeric_limits<unsigned int>::max()) //
+  {
+    last_command_time_ = ros::Time::now();
+    usr_command_ = true;
+  }
   std::vector<std::string> start_controllers;
   std::vector<std::string> stop_controllers;
   if(current_mode_ != msg->mode)
