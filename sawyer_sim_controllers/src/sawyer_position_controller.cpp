@@ -40,7 +40,18 @@ namespace sawyer_sim_controllers {
       speed_ratio->data = 0.3; // Default to 30% max urdf speed
       speed_ratio_buffer_.set(speed_ratio);
     }
+    sub_cmd_timeout_ = n.subscribe("limb/right/joint_command_timeout", 1,
+                         &SawyerPositionController::jointCommandTimeoutCallback, this);
+    double command_timeout;
+    n.param<double>("command_timeout", command_timeout, 0.2);
+    cmd_timeout_ = ros::Duration(command_timeout);
     return true;
+  }
+
+  void SawyerPositionController::jointCommandTimeoutCallback(const std_msgs::Float64 msg) {
+    ROS_INFO_STREAM_NAMED(JOINT_ARRAY_CONTROLLER_NAME, "Joint command timeout: " << msg.data);
+    // TODO: Stuff this into a realtime box
+    cmd_timeout_ = ros::Duration(std::min(0.0, std::max(1.0, double(msg.data))));
   }
 
   void SawyerPositionController::speedRatioCallback(const std_msgs::Float64 msg) {
@@ -137,6 +148,8 @@ namespace sawyer_sim_controllers {
     else if(msg->mode == intera_core_msgs::JointCommand::TRAJECTORY_MODE) {
       commands = cmdTrajectoryMode(msg);
     }
+    auto p_cmd_msg_time = std::make_shared<ros::Time>(ros::Time::now());
+    box_cmd_timeout_.set(p_cmd_msg_time);
     // Only write the command if this is the correct command mode, with a valid CommandPtr
     if(commands.get()) {
       command_buffer_.writeFromNonRT(*commands.get());
@@ -147,8 +160,16 @@ namespace sawyer_sim_controllers {
   void SawyerPositionController::setCommands() {
     // set the new commands for each controller
     std::vector<Command> command = *(command_buffer_.readFromRT());
+    // Command Timeout?
+    std::shared_ptr<const ros::Time>  p_cmd_msg_time;
+    box_cmd_timeout_.get(p_cmd_msg_time);
+    // TODO: Realtime box for cmd_timeout_ && add this code to arm_controller_interface
+    bool command_timeout = !p_cmd_msg_time || ((ros::Time::now() - *p_cmd_msg_time.get()) > cmd_timeout_);
     for (auto it = command.begin(); it != command.end(); it++) {
-      if (it->has_velocity_) {
+      if (command_timeout) {
+        controllers_[it->name_]->setCommand(controllers_[it->name_]->joint_.getPosition());
+      }
+      else if (it->has_velocity_) {
         controllers_[it->name_]->setCommand(it->position_, it->velocity_);
       } else {
         controllers_[it->name_]->setCommand(it->position_);

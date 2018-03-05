@@ -44,10 +44,15 @@ namespace sawyer_sim_controllers
     ros::Subscriber sub_joint_command_;
     int lastMode;
 
+    ros::Subscriber sub_cmd_timeout_;
+    realtime_tools::RealtimeBox< std::shared_ptr<const ros::Time > > box_cmd_timeout_;
+    ros::Duration cmd_timeout_;
+
     ros::Subscriber sub_speed_ratio_;
     realtime_tools::RealtimeBox< std::shared_ptr<const std_msgs::Float64> > speed_ratio_buffer_;
     void speedRatioCallback(const std_msgs::Float64 msg);
     void jointCommandCB(const intera_core_msgs::JointCommandConstPtr& msg);
+    void jointCommandTimeoutCallback(const std_msgs::Float64 msg);
     CommandsPtr cmdTrajectoryMode(const intera_core_msgs::JointCommandConstPtr& msg);
     CommandsPtr cmdPositionMode(const intera_core_msgs::JointCommandConstPtr& msg);
 
