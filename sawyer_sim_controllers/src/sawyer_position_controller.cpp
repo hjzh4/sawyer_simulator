@@ -16,42 +16,55 @@
 
 #include <sawyer_sim_controllers/sawyer_position_controller.h>
 #include <pluginlib/class_list_macros.h>
+#include <ros/time.h>
 
 namespace sawyer_sim_controllers {
   bool SawyerPositionController::init(sawyer_hardware_interface::SharedJointInterface* hw, ros::NodeHandle &n){
-    if(!sawyer_sim_controllers::JointArrayController<sawyer_effort_controllers::JointPositionController>::init(hw, n)) {
+    if(!sawyer_sim_controllers::JointArrayController<sawyer_effort_controllers::JointPositionController>::init(hw, n)){
       return false;
-    } else {
-      std::string topic_name;
-      if (n.getParam("topic_joint_command", topic_name)) {
-        ros::NodeHandle nh("~");
-        sub_joint_command_ = nh.subscribe(topic_name, 1, &SawyerPositionController::jointCommandCB, this);
-      } else {
-        sub_joint_command_ = n.subscribe("joint_command", 1, &SawyerPositionController::jointCommandCB, this);
-      }
-      std::string topic_speed_ratio;
-      if (n.getParam("topic_set_speed_ratio", topic_speed_ratio)) {
-        ros::NodeHandle nh("~");
-        sub_speed_ratio_ = nh.subscribe(topic_speed_ratio, 1, &SawyerPositionController::speedRatioCallback, this);
-      } else {
-        sub_speed_ratio_ = n.subscribe("set_speed_ratio", 1, &SawyerPositionController::speedRatioCallback, this);
-      }
-      std::shared_ptr<std_msgs::Float64> speed_ratio(new std_msgs::Float64());
-      speed_ratio->data = 0.3; // Default to 30% max urdf speed
-      speed_ratio_buffer_.set(speed_ratio);
     }
-    sub_cmd_timeout_ = n.subscribe("limb/right/joint_command_timeout", 1,
-                         &SawyerPositionController::jointCommandTimeoutCallback, this);
-    double command_timeout;
-    n.param<double>("command_timeout", command_timeout, 0.2);
-    cmd_timeout_ = ros::Duration(command_timeout);
+
+    // Joint Commands
+    std::string topic_name;
+    if (n.getParam("topic_joint_command", topic_name)) {
+      ros::NodeHandle nh("~");
+      sub_joint_command_ = nh.subscribe(topic_name, 1, &SawyerPositionController::jointCommandCB, this);
+    } else {
+      sub_joint_command_ = n.subscribe("joint_command", 1, &SawyerPositionController::jointCommandCB, this);
+    }
+
+    // Speed Ratio
+    std::string topic_speed_ratio;
+    if (n.getParam("topic_set_speed_ratio", topic_speed_ratio)) {
+      ros::NodeHandle nh("~");
+      sub_speed_ratio_ = nh.subscribe(topic_speed_ratio, 1, &SawyerPositionController::speedRatioCallback, this);
+    } else {
+      sub_speed_ratio_ = n.subscribe("set_speed_ratio", 1, &SawyerPositionController::speedRatioCallback, this);
+    }
+    std::shared_ptr<std_msgs::Float64> speed_ratio(new std_msgs::Float64());
+    speed_ratio->data = 0.3; // Default to 30% max urdf speed
+    box_speed_ratio_.set(speed_ratio);
+
+    // Command Timeout
+    std::string topic_command_timeout;
+    if (n.getParam("topic_command_timeout", topic_command_timeout)) {
+      ros::NodeHandle nh("~");
+      sub_cmd_timeout_ = nh.subscribe(topic_command_timeout, 1, &SawyerPositionController::jointCommandTimeoutCallback, this);
+    } else {
+      sub_cmd_timeout_ = n.subscribe("command_timeout", 1, &SawyerPositionController::jointCommandTimeoutCallback, this);
+    }
+    double command_timeout_default;
+    n.param<double>("command_timeout", command_timeout_default, 0.2);
+    auto p_cmd_timeout_length = std::make_shared<ros::Duration>(std::min(1.0, std::max(0.0, command_timeout_default)));
+    box_timeout_length_.set(p_cmd_timeout_length);
+
     return true;
   }
 
   void SawyerPositionController::jointCommandTimeoutCallback(const std_msgs::Float64 msg) {
     ROS_INFO_STREAM_NAMED(JOINT_ARRAY_CONTROLLER_NAME, "Joint command timeout: " << msg.data);
-    // TODO: Stuff this into a realtime box
-    cmd_timeout_ = ros::Duration(std::min(0.0, std::max(1.0, double(msg.data))));
+    auto p_cmd_timeout_length = std::make_shared<ros::Duration>(std::min(1.0, std::max(0.0, double(msg.data))));
+    box_timeout_length_.set(p_cmd_timeout_length);
   }
 
   void SawyerPositionController::speedRatioCallback(const std_msgs::Float64 msg) {
@@ -65,7 +78,7 @@ namespace sawyer_sim_controllers {
     else{
       speed_ratio->data = msg.data;
     }
-    speed_ratio_buffer_.set(speed_ratio);
+    box_speed_ratio_.set(speed_ratio);
   }
 
   SawyerPositionController::CommandsPtr SawyerPositionController::cmdPositionMode(const intera_core_msgs::JointCommandConstPtr& msg) {
@@ -93,7 +106,7 @@ namespace sawyer_sim_controllers {
     }
     CommandsPtr commands(new std::vector<Command>());
     std::shared_ptr<const std_msgs::Float64> speed_ratio;
-    speed_ratio_buffer_.get(speed_ratio);
+    box_speed_ratio_.get(speed_ratio);
     double velocity_direction;
     // Command Joint Position and
     // Command Velocity proportional to amount of time it will take the longest
@@ -160,11 +173,15 @@ namespace sawyer_sim_controllers {
   void SawyerPositionController::setCommands() {
     // set the new commands for each controller
     std::vector<Command> command = *(command_buffer_.readFromRT());
-    // Command Timeout?
+
+    // Check Command Timeout
     std::shared_ptr<const ros::Time>  p_cmd_msg_time;
     box_cmd_timeout_.get(p_cmd_msg_time);
-    // TODO: Realtime box for cmd_timeout_ && add this code to arm_controller_interface
-    bool command_timeout = !p_cmd_msg_time || ((ros::Time::now() - *p_cmd_msg_time.get()) > cmd_timeout_);
+    std::shared_ptr<const ros::Duration>  p_timeout_length;
+    box_timeout_length_.get(p_timeout_length);
+    bool command_timeout = p_cmd_msg_time && p_timeout_length && ((ros::Time::now() - *p_cmd_msg_time.get()) > *p_timeout_length.get());
+
+    // Feed commands into the controllers
     for (auto it = command.begin(); it != command.end(); it++) {
       if (command_timeout) {
         controllers_[it->name_]->setCommand(controllers_[it->name_]->joint_.getPosition());

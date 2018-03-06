@@ -20,6 +20,7 @@ robot:
     type: sawyer_sim_controllers/SawyerPositionController
     topic_joint_command: /robot/limb/right/joint_command
     topic_set_speed_ratio: /robot/limb/right/set_speed_ratio
+    topic_command_timeout: /robot/limb/right/joint_command_timeout
     joints:
       right_j0_controller:
         joint: right_j0

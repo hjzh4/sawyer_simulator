@@ -41,15 +41,15 @@ namespace sawyer_sim_controllers
     // mutex for re-entrant calls to modeCommandCallback
     std::mutex mtx_;
     typedef std::unique_ptr<std::vector<Command>> CommandsPtr;
-    ros::Subscriber sub_joint_command_;
-    int lastMode;
+
+    realtime_tools::RealtimeBox< std::shared_ptr<const ros::Time > > box_cmd_timeout_;
+    realtime_tools::RealtimeBox< std::shared_ptr<const ros::Duration > > box_timeout_length_;
+    realtime_tools::RealtimeBox< std::shared_ptr<const std_msgs::Float64> > box_speed_ratio_;
 
     ros::Subscriber sub_cmd_timeout_;
-    realtime_tools::RealtimeBox< std::shared_ptr<const ros::Time > > box_cmd_timeout_;
-    ros::Duration cmd_timeout_;
-
+    ros::Subscriber sub_joint_command_;
     ros::Subscriber sub_speed_ratio_;
-    realtime_tools::RealtimeBox< std::shared_ptr<const std_msgs::Float64> > speed_ratio_buffer_;
+
     void speedRatioCallback(const std_msgs::Float64 msg);
     void jointCommandCB(const intera_core_msgs::JointCommandConstPtr& msg);
     void jointCommandTimeoutCallback(const std_msgs::Float64 msg);
