@@ -59,7 +59,7 @@ bool JointVelocityController::init(sawyer_hardware_interface::SharedJointInterfa
   return true;
 }
 
-bool JointVelocityController::init(sawyer_hardware_interface::SharedJointInterface *robot, ros::NodeHandle &n)
+bool JointVelocityController::init(sawyer_hardware_interface::SharedJointInterface *robot, ros::NodeHandle &n,  const std::string& ctrl_type)
 {
   // Get joint name from parameter server
   std::string joint_name;
@@ -69,7 +69,7 @@ bool JointVelocityController::init(sawyer_hardware_interface::SharedJointInterfa
   }
 
   // Get joint handle from hardware interface
-  joint_ = robot->getHandle(joint_name);
+  joint_ = robot->getHandle(joint_name, ctrl_type);
 
   // Load PID Controller using gains set on parameter server
   if (!pid_controller_.init(ros::NodeHandle(n, "pid")))

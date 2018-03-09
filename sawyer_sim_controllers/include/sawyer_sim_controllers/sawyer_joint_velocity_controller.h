@@ -97,13 +97,13 @@ public:
    * \returns True if initialization was successful and the controller
    * is ready to be started.
    */
-  bool init(sawyer_hardware_interface::SharedJointInterface *robot, ros::NodeHandle &n);
-  bool init(sawyer_hardware_interface::SharedJointInterface *robot, ros::NodeHandle &n, const std::string& ctrl_type)
-  {
-    // ctrl_type is no-op for non-effort control
-    return init(robot, n);
-  }
+  bool init(sawyer_hardware_interface::SharedJointInterface *robot, ros::NodeHandle &n, const std::string& ctrl_type);
 
+
+  bool init(sawyer_hardware_interface::SharedJointInterface *robot, ros::NodeHandle &n){
+    // ctrl_type is Defaults to "VELOCITY"
+    return init(robot, n, "VELOCITY");
+  }
   /*!
    * \brief Give set velocity of the joint for next update: revolute (angle) and prismatic (velocity)
    *
