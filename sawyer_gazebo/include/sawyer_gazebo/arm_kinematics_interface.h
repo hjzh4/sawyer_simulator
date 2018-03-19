@@ -154,12 +154,13 @@ bool computePositionIK(const Kinematics& kin, const geometry_msgs::Pose& cart_po
  */
 bool computeVelocityFK(const Kinematics& kin, const KDL::JntArrayVel& jnt_vel, geometry_msgs::Twist& result);
 
-/* Method to calculate the gravity torques FK for the required joint positions in rad and
+/* Method to calculate the gravity+coriolis+inertia torques for the required joint positions in rad and
  * joint velocities in rad/sec with the result stored in the provided KDL JointArray
  * @returns true if successful
  */
-bool computeGravityFK(const Kinematics& kin, const KDL::JntArray& jnt_pos,
-                      const KDL::JntArray& jnt_vel, KDL::JntArray& jnt_torques);
+bool computeGravity(const Kinematics& kin, const KDL::JntArray& jnt_pos,
+                    const KDL::JntArray& jnt_vel, const KDL::JntArray& jnt_accel,
+                    KDL::JntArray& jnt_torques);
 
 /* Method to break down a JointState message object into the corresponding
  * KDL position, velocity, and effort Joint Arrays

@@ -235,7 +235,7 @@ void ArmKinematicsInterface::update(const ros::TimerEvent& e)
 void ArmKinematicsInterface::jointStateCallback(const sensor_msgs::JointStateConstPtr& msg)
 {
   auto joint_state = std::make_shared<sensor_msgs::JointState>(*msg);
-  joint_state_buffer_.set(joint_state);  // FIXME - what happens when different joint states messages are received?
+  joint_state_buffer_.set(joint_state);
 }
 
 void ArmKinematicsInterface::jointCommandCallback(const intera_core_msgs::JointCommandConstPtr& msg)
@@ -251,33 +251,69 @@ void ArmKinematicsInterface::publishGravityTorques()
   if (joint_state.get())
   {
     intera_core_msgs::SEAJointState gravity_torques;
+    KDL::JntArray jnt_pos, jnt_vel, jnt_eff, jnt_accelerations, jnt_gravity_model, jnt_gravity_only, jnt_zero;
     auto j_state = *joint_state.get();
     auto num_jnts = kinematic_chain_map_[tip_name_].chain.getNrOfJoints();
+    jnt_accelerations.resize(num_jnts);
+    jnt_zero.resize(num_jnts);
     gravity_torques.name.resize(num_jnts);
     gravity_torques.actual_position.resize(num_jnts);
     gravity_torques.actual_velocity.resize(num_jnts);
     gravity_torques.actual_effort.resize(num_jnts);
-    gravity_torques.gravity_only.resize(num_jnts);
-    // FIXME(imcmahon): Populate below fields
     gravity_torques.commanded_position.resize(num_jnts);
     gravity_torques.commanded_velocity.resize(num_jnts);
     gravity_torques.commanded_acceleration.resize(num_jnts);
     gravity_torques.commanded_effort.resize(num_jnts);
+    std::shared_ptr<const intera_core_msgs::JointCommand> joint_command;
+    joint_command_buffer_.get(joint_command);
+    if (joint_command.get()){
+      for (auto i = 0; i<num_jnts; i++) {
+        for(auto j = 0; j < joint_command->names.size(); j++) {
+          if(joint_command->names[j] == kinematic_chain_map_[tip_name_].joint_names[i])
+          {
+            if(joint_command->position.size() == joint_command->names.size() &&
+                 (joint_command->mode == joint_command->POSITION_MODE ||
+                  joint_command->mode == joint_command->TRAJECTORY_MODE))
+              gravity_torques.commanded_position[i] = joint_command->position[j];
+            if(joint_command->velocity.size() == joint_command->names.size() &&
+                 (joint_command->mode == joint_command->VELOCITY_MODE ||
+                  joint_command->mode == joint_command->TRAJECTORY_MODE))
+              gravity_torques.commanded_velocity[i] = joint_command->velocity[j];
+            if(joint_command->effort.size() == joint_command->names.size() &&
+                 joint_command->mode == joint_command->TORQUE_MODE)
+              gravity_torques.commanded_effort[i] = joint_command->effort[j];
+            if(joint_command->acceleration.size() == joint_command->names.size() &&
+                 joint_command->mode == joint_command->TRAJECTORY_MODE)
+            {
+              gravity_torques.commanded_acceleration[i] = joint_command->acceleration[j];
+              if((ros::Time::now() - joint_command->header.stamp).toSec() < 0.2)
+                jnt_accelerations(i) = joint_command->acceleration[j];
+            }
+
+          }
+        }
+      }
+    }
     gravity_torques.gravity_model_effort.resize(num_jnts);
+    gravity_torques.gravity_only.resize(num_jnts);
+    // FIXME(imcmahon): Populate below fields
     gravity_torques.interaction_torque.resize(num_jnts);
     gravity_torques.hysteresis_model_effort.resize(num_jnts);
     gravity_torques.crosstalk_model_effort.resize(num_jnts);
     // FIXME(imcmahon): Populate above fields
-    KDL::JntArray jnt_pos, jnt_vel, jnt_eff, jnt_torques;
     jointStateToKDL(j_state, kinematic_chain_map_[tip_name_], jnt_pos, jnt_vel, jnt_eff);
-    computeGravityFK(kinematic_chain_map_[tip_name_], jnt_pos, jnt_vel, jnt_torques);
+    computeGravity(kinematic_chain_map_[tip_name_], jnt_pos, jnt_vel, jnt_accelerations, jnt_gravity_model);
+    computeGravity(kinematic_chain_map_[tip_name_], jnt_pos, jnt_zero, jnt_zero, jnt_gravity_only);
     gravity_torques.name = kinematic_chain_map_[tip_name_].joint_names;
     for (size_t jnt_idx = 0; jnt_idx < num_jnts; jnt_idx++)
     {
       gravity_torques.actual_position[jnt_idx] = jnt_pos(jnt_idx);
       gravity_torques.actual_velocity[jnt_idx] = jnt_vel(jnt_idx);
       gravity_torques.actual_effort[jnt_idx] = jnt_eff(jnt_idx);
-      gravity_torques.gravity_only[jnt_idx] = jnt_torques(jnt_idx);
+      auto torque_limit = robot_model_.getJoint(gravity_torques.name[jnt_idx])->limits->effort;
+      auto clamp_limit = [](double i, double limit) { return std::max(std::min(limit, i), -limit); };
+      gravity_torques.gravity_model_effort[jnt_idx] = clamp_limit(jnt_gravity_model(jnt_idx), torque_limit);
+      gravity_torques.gravity_only[jnt_idx] = clamp_limit(jnt_gravity_only(jnt_idx), torque_limit);
     }
     gravity_torques.header.frame_id = root_name_;
     gravity_torques_seq_++;
@@ -438,19 +474,16 @@ bool ArmKinematicsInterface::servicePositionFK(intera_core_msgs::SolvePositionFK
   return true;
 }
 
-bool ArmKinematicsInterface::computeGravityFK(const Kinematics& kin,
+bool ArmKinematicsInterface::computeGravity(const Kinematics& kin,
                                               const KDL::JntArray& jnt_pos,
                                               const KDL::JntArray& jnt_vel,
+                                              const KDL::JntArray& jnt_accel,
                                               KDL::JntArray& jnt_torques)
 {
-  KDL::JntArray jnt_accel;
-  jnt_accel.resize(kin.chain.getNrOfJoints());
-
   KDL::JntArray zero(kin.chain.getNrOfJoints());
   std::vector<KDL::Wrench> f_ext(kin.chain.getNrOfSegments(), KDL::Wrench::Zero());
   jnt_torques.resize(kin.chain.getNrOfJoints());
-
-  return !(kin.gravity_solver->CartToJnt(jnt_pos, zero, zero, f_ext, jnt_torques) < 0);
+  return !(kin.gravity_solver->CartToJnt(jnt_pos, jnt_vel, jnt_accel, f_ext, jnt_torques) < 0);
 }
 
 bool ArmKinematicsInterface::computePositionFK(const Kinematics& kin,
