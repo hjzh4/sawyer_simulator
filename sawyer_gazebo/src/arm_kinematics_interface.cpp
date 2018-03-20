@@ -256,6 +256,8 @@ void ArmKinematicsInterface::publishGravityTorques()
     auto num_jnts = kinematic_chain_map_[tip_name_].chain.getNrOfJoints();
     jnt_accelerations.resize(num_jnts);
     jnt_zero.resize(num_jnts);
+    KDL::SetToZero(jnt_accelerations);
+    KDL::SetToZero(jnt_zero);
     gravity_torques.name.resize(num_jnts);
     gravity_torques.actual_position.resize(num_jnts);
     gravity_torques.actual_velocity.resize(num_jnts);
@@ -305,13 +307,13 @@ void ArmKinematicsInterface::publishGravityTorques()
     computeGravity(kinematic_chain_map_[tip_name_], jnt_pos, jnt_vel, jnt_accelerations, jnt_gravity_model);
     computeGravity(kinematic_chain_map_[tip_name_], jnt_pos, jnt_zero, jnt_zero, jnt_gravity_only);
     gravity_torques.name = kinematic_chain_map_[tip_name_].joint_names;
+    auto clamp_limit = [](double i, double limit) { return std::max(std::min(limit, i), -limit); };
     for (size_t jnt_idx = 0; jnt_idx < num_jnts; jnt_idx++)
     {
       gravity_torques.actual_position[jnt_idx] = jnt_pos(jnt_idx);
       gravity_torques.actual_velocity[jnt_idx] = jnt_vel(jnt_idx);
       gravity_torques.actual_effort[jnt_idx] = jnt_eff(jnt_idx);
       auto torque_limit = robot_model_.getJoint(gravity_torques.name[jnt_idx])->limits->effort;
-      auto clamp_limit = [](double i, double limit) { return std::max(std::min(limit, i), -limit); };
       gravity_torques.gravity_model_effort[jnt_idx] = clamp_limit(jnt_gravity_model(jnt_idx), torque_limit);
       gravity_torques.gravity_only[jnt_idx] = clamp_limit(jnt_gravity_only(jnt_idx), torque_limit);
     }
@@ -480,7 +482,6 @@ bool ArmKinematicsInterface::computeGravity(const Kinematics& kin,
                                               const KDL::JntArray& jnt_accel,
                                               KDL::JntArray& jnt_torques)
 {
-  KDL::JntArray zero(kin.chain.getNrOfJoints());
   std::vector<KDL::Wrench> f_ext(kin.chain.getNrOfSegments(), KDL::Wrench::Zero());
   jnt_torques.resize(kin.chain.getNrOfJoints());
   return !(kin.gravity_solver->CartToJnt(jnt_pos, jnt_vel, jnt_accel, f_ext, jnt_torques) < 0);
